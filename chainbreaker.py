@@ -25,7 +25,7 @@ from sys import exit
 import struct
 from binascii import unhexlify
 import datetime
-from hexdump import hexdump 
+from hexdump import hexdump
 
 from pbkdf2 import pbkdf2
 
@@ -386,7 +386,7 @@ class KeyChain():
             record.append(Buffer[:RecordMeta.SSGPArea])
         else:
             record.append('')
-        
+
         record.append(self.getKeychainTime(BASE_ADDR, RecordMeta.CreationDate & 0xFFFFFFFE))
         record.append(self.getKeychainTime(BASE_ADDR, RecordMeta.ModDate & 0xFFFFFFFE))
 
@@ -438,7 +438,7 @@ class KeyChain():
 
         record.append(self.getInt(BASE_ADDR, RecordMeta.Port & 0xFFFFFFFE))
 
-        record.append(self.getLV(BASE_ADDR, RecordMeta.Path & 0xFFFFFFFE))        
+        record.append(self.getLV(BASE_ADDR, RecordMeta.Path & 0xFFFFFFFE))
 
         return record
 
@@ -628,7 +628,7 @@ class KeyChain():
 
         # now the real key gets found. */
         plain = kcdecrypt(dbkey, iv, revplain)
-        
+
         Keyname = plain[:12]    # Copied Buffer when user click on right and copy a key on Keychain Access
         keyblob = plain[12:]
 
@@ -718,9 +718,20 @@ def main():
     parser = argparse.ArgumentParser(description='Tool for OS X Keychain Analysis by @n0fate')
     parser.add_argument('-f', '--file', nargs=1, help='Keychain file(*.keychain)', required=True)
     #parser.add_argument('-x', '--exportfile', nargs=1, help='Export a filename (SQLite, optional)', required=False)
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument('-k', '--key', nargs=1, help='Masterkey candidate', required=False)
-    group.add_argument('-p', '--password', nargs=1, help='User Password', required=False)
+    group1 = parser.add_mutually_exclusive_group(required=True)
+    group1.add_argument('-k', '--key', nargs=1, help='Masterkey candidate', required=False)
+    group1.add_argument('-p', '--password', nargs=1, help='User Password', required=False)
+
+    parser.add_argument('-g', '--genericpw', default=False, help='Get Generic PW Only', required=False, action='store_true')
+    parser.add_argument('-i', '--internetpw', default=False, help='Get Internet PW Only', required=False, action='store_true')
+    parser.add_argument('-a', '--appleshare', default=False, help='Get Apple Share Only', required=False, action='store_true')
+    parser.add_argument('-c', '--cert', default=False, help='Get x509 Certs Only', required=False, action='store_true')
+    parser.add_argument('-q', '--pubkey', default=False, help='Get Public Keys Only', required=False, action='store_true')
+
+    group2 = parser.add_argument_group('Private Key Searching')
+    group2.add_argument('-z', '--privkey', default=False, help='Get Private Keys Only', required=True, action='store_true')
+    group2.add_argument('-x', '--pkname', nargs=1, help='Print only PEM formatted Private Key for given name', required=False)
+
     args = parser.parse_args()
 
     if os.path.exists(args.file[0]) is False:
@@ -729,7 +740,7 @@ def main():
         exit()
 
     keychain = KeyChain(args.file[0])
-    
+
     if keychain.open() is False:
         print '[!] ERROR: %s Open Failed'%args.file[0]
         parser.print_help()
@@ -759,19 +770,21 @@ def main():
     else:
         print '[!] ERROR: password or master key candidate is invalid'
         exit()
-    
+
     if len(dbkey) == 0:
         print '[!] ERROR: password or master key candidate is invalid'
         exit()
 
     # DEBUG
-    print ' [-] DB Key'
-    hexdump(dbkey)
+    if args.pkname is None:
+        print ' [-] DB Key'
+        hexdump(dbkey)
 
     key_list = {}  # keyblob list
 
     # get symmetric key blob
-    print '[+] Symmetric Key Table: 0x%.8x' % (sizeof(_APPL_DB_HEADER) + TableList[tableEnum[CSSM_DL_DB_RECORD_SYMMETRIC_KEY]])
+    if args.pkname is None:
+        print '[+] Symmetric Key Table: 0x%.8x' % (sizeof(_APPL_DB_HEADER) + TableList[tableEnum[CSSM_DL_DB_RECORD_SYMMETRIC_KEY]])
     TableMetadata, symmetrickey_list = keychain.getTable(TableList[tableEnum[CSSM_DL_DB_RECORD_SYMMETRIC_KEY]])
 
     for symmetrickey_record in symmetrickey_list:
@@ -782,201 +795,219 @@ def main():
             if passwd != '':
                 key_list[keyblob] = passwd
 
-    try:
-        TableMetadata, genericpw_list = keychain.getTable(TableList[tableEnum[CSSM_DL_DB_RECORD_GENERIC_PASSWORD]])
+    if args.genericpw:
+        try:
+            TableMetadata, genericpw_list = keychain.getTable(TableList[tableEnum[CSSM_DL_DB_RECORD_GENERIC_PASSWORD]])
 
-        for genericpw in genericpw_list:
-            record = keychain.getGenericPWRecord(TableList[tableEnum[CSSM_DL_DB_RECORD_GENERIC_PASSWORD]], genericpw)
-            print '[+] Generic Password Record'
-            try:
-                real_key = key_list[record[0][0:20]]
-                passwd = keychain.SSGPDecryption(record[0], real_key)
-            except KeyError:
-                passwd = ''
-            print ' [-] Create DateTime: %s' % record[1]  # 16byte string
-            print ' [-] Last Modified DateTime: %s' % record[2]  # 16byte string
-            print ' [-] Description : %s' % record[3].rstrip('\0')
-            print ' [-] Creator : %s' % record[4]
-            print ' [-] Type : %s' % record[5]
-            print ' [-] PrintName : %s' % record[6].rstrip('\0')
-            print ' [-] Alias : %s' % record[7].rstrip('\0')
-            print ' [-] Account : %s' % record[8].rstrip('\0')
-            print ' [-] Service : %s' % record[9].rstrip('\0')
-            print ' [-] Password'
-            hexdump(passwd)
-            print ''
+            for genericpw in genericpw_list:
+                record = keychain.getGenericPWRecord(TableList[tableEnum[CSSM_DL_DB_RECORD_GENERIC_PASSWORD]], genericpw)
+                print '[+] Generic Password Record'
+                try:
+                    real_key = key_list[record[0][0:20]]
+                    passwd = keychain.SSGPDecryption(record[0], real_key)
+                except KeyError:
+                    passwd = ''
+                print ' [-] Create DateTime: %s' % record[1]  # 16byte string
+                print ' [-] Last Modified DateTime: %s' % record[2]  # 16byte string
+                print ' [-] Description : %s' % record[3].rstrip('\0')
+                print ' [-] Creator : %s' % record[4]
+                print ' [-] Type : %s' % record[5]
+                print ' [-] PrintName : %s' % record[6].rstrip('\0')
+                print ' [-] Alias : %s' % record[7].rstrip('\0')
+                print ' [-] Account : %s' % record[8].rstrip('\0')
+                print ' [-] Service : %s' % record[9].rstrip('\0')
+                print ' [-] Password'
+                hexdump(passwd)
+                print ''
 
-    except KeyError:
-        print '[!] Generic Password Table is not available'
-        pass
+        except KeyError:
+            print '[!] Generic Password Table is not available'
+            pass
 
-    try:
-        TableMetadata, internetpw_list = keychain.getTable(TableList[tableEnum[CSSM_DL_DB_RECORD_INTERNET_PASSWORD]])
+    if args.internetpw:
+        try:
+            TableMetadata, internetpw_list = keychain.getTable(TableList[tableEnum[CSSM_DL_DB_RECORD_INTERNET_PASSWORD]])
 
-        for internetpw in internetpw_list:
-            record = keychain.getInternetPWRecord(TableList[tableEnum[CSSM_DL_DB_RECORD_INTERNET_PASSWORD]], internetpw)
-            print '[+] Internet Record'
-            try:
-                real_key = key_list[record[0][0:20]]
-                passwd = keychain.SSGPDecryption(record[0], real_key)
-            except KeyError:
-                passwd = ''
-            print ' [-] Create DateTime: %s' % record[1]  # 16byte string
-            print ' [-] Last Modified DateTime: %s' % record[2]  # 16byte string
-            print ' [-] Description : %s' % record[3].rstrip('\0')
-            print ' [-] Comment : %s' % record[4]
-            print ' [-] Creator : %s' % record[5]
-            print ' [-] Type : %s' % record[6]
-            print ' [-] PrintName : %s' % record[7].rstrip('\0')
-            print ' [-] Alias : %s' % record[8]
-            print ' [-] Protected : %s' % record[9]
-            print ' [-] Account : %s' % record[10]
-            print ' [-] SecurityDomain : %s' % record[11]
-            print ' [-] Server : %s' % record[12]
-            try:
-                print ' [-] Protocol Type : %s' % PROTOCOL_TYPE[record[13]]
-            except KeyError:
-                print ' [-] Protocol Type : %s' % record[13]
-            try:
-                print ' [-] Auth Type : %s' % AUTH_TYPE[record[14]]
-            except KeyError:
-                print ' [-] Auth Type : %s' % record[14]
-            print ' [-] Port : %d' % record[15]
-            print ' [-] Path : %s' % record[16]
-            print ' [-] Password'
-            hexdump(passwd)
-            print ''
+            for internetpw in internetpw_list:
+                record = keychain.getInternetPWRecord(TableList[tableEnum[CSSM_DL_DB_RECORD_INTERNET_PASSWORD]], internetpw)
+                print '[+] Internet Record'
+                try:
+                    real_key = key_list[record[0][0:20]]
+                    passwd = keychain.SSGPDecryption(record[0], real_key)
+                except KeyError:
+                    passwd = ''
+                print ' [-] Create DateTime: %s' % record[1]  # 16byte string
+                print ' [-] Last Modified DateTime: %s' % record[2]  # 16byte string
+                print ' [-] Description : %s' % record[3].rstrip('\0')
+                print ' [-] Comment : %s' % record[4]
+                print ' [-] Creator : %s' % record[5]
+                print ' [-] Type : %s' % record[6]
+                print ' [-] PrintName : %s' % record[7].rstrip('\0')
+                print ' [-] Alias : %s' % record[8]
+                print ' [-] Protected : %s' % record[9]
+                print ' [-] Account : %s' % record[10]
+                print ' [-] SecurityDomain : %s' % record[11]
+                print ' [-] Server : %s' % record[12]
+                try:
+                    print ' [-] Protocol Type : %s' % PROTOCOL_TYPE[record[13]]
+                except KeyError:
+                    print ' [-] Protocol Type : %s' % record[13]
+                try:
+                    print ' [-] Auth Type : %s' % AUTH_TYPE[record[14]]
+                except KeyError:
+                    print ' [-] Auth Type : %s' % record[14]
+                print ' [-] Port : %d' % record[15]
+                print ' [-] Path : %s' % record[16]
+                print ' [-] Password'
+                hexdump(passwd)
+                print ''
 
-    except KeyError:
-        print '[!] Internet Password Table is not available'
-        pass
+        except KeyError:
+            print '[!] Internet Password Table is not available'
+            pass
 
-    try:
-        TableMetadata, applesharepw_list = keychain.getTable(TableList[tableEnum[CSSM_DL_DB_RECORD_APPLESHARE_PASSWORD]])
+    if args.appleshare:
+        try:
+            TableMetadata, applesharepw_list = keychain.getTable(TableList[tableEnum[CSSM_DL_DB_RECORD_APPLESHARE_PASSWORD]])
 
-        for applesharepw in applesharepw_list:
-            record = keychain.getAppleshareRecord(TableList[tableEnum[CSSM_DL_DB_RECORD_APPLESHARE_PASSWORD]], applesharepw)
-            print '[+] AppleShare Record (no more used OS X)'
-            try:
-                real_key = key_list[record[0][0:20]]
-                passwd = keychain.SSGPDecryption(record[0], real_key)
-            except KeyError:
-                passwd = ''
-            #print ''
-            print ' [-] Create DateTime: %s' % record[1]  # 16byte string
-            print ' [-] Last Modified DateTime: %s' % record[2]  # 16byte string
-            print ' [-] Description : %s' % record[3].rstrip('\0')
-            print ' [-] Comment : %s' % record[4].rstrip('\0')
-            print ' [-] Creator : %s' % record[5]
-            print ' [-] Type : %s' % record[6]
-            print ' [-] PrintName : %s' % record[7].rstrip('\0')
-            print ' [-] Alias : %s' % record[8]
-            print ' [-] Protected : %s' % record[9]
-            print ' [-] Account : %s' % record[10].rstrip('\0')
-            print ' [-] Volume : %s' % record[11]
-            print ' [-] Server : %s' % record[12]
-            try:
-                print ' [-] Protocol Type : %s' % PROTOCOL_TYPE[record[13]]
-            except KeyError:
-                print ' [-] Protocol Type : %s' % record[13]
-            print ' [-] Address : %d' % record[14]
-            print ' [-] Signature : %s' % record[15]
-            print ' [-] Password'
-            hexdump(passwd)
-            print ''
+            for applesharepw in applesharepw_list:
+                record = keychain.getAppleshareRecord(TableList[tableEnum[CSSM_DL_DB_RECORD_APPLESHARE_PASSWORD]], applesharepw)
+                print '[+] AppleShare Record (no more used OS X)'
+                try:
+                    real_key = key_list[record[0][0:20]]
+                    passwd = keychain.SSGPDecryption(record[0], real_key)
+                except KeyError:
+                    passwd = ''
+                #print ''
+                print ' [-] Create DateTime: %s' % record[1]  # 16byte string
+                print ' [-] Last Modified DateTime: %s' % record[2]  # 16byte string
+                print ' [-] Description : %s' % record[3].rstrip('\0')
+                print ' [-] Comment : %s' % record[4].rstrip('\0')
+                print ' [-] Creator : %s' % record[5]
+                print ' [-] Type : %s' % record[6]
+                print ' [-] PrintName : %s' % record[7].rstrip('\0')
+                print ' [-] Alias : %s' % record[8]
+                print ' [-] Protected : %s' % record[9]
+                print ' [-] Account : %s' % record[10].rstrip('\0')
+                print ' [-] Volume : %s' % record[11]
+                print ' [-] Server : %s' % record[12]
+                try:
+                    print ' [-] Protocol Type : %s' % PROTOCOL_TYPE[record[13]]
+                except KeyError:
+                    print ' [-] Protocol Type : %s' % record[13]
+                print ' [-] Address : %d' % record[14]
+                print ' [-] Signature : %s' % record[15]
+                print ' [-] Password'
+                hexdump(passwd)
+                print ''
 
-    except KeyError:
-        print '[!] AppleShare Table is not available'
-        pass
+        except KeyError:
+            print '[!] AppleShare Table is not available'
+            pass
 
-    try:
-        TableMetadata, x509CertList = keychain.getTable(TableList[tableEnum[CSSM_DL_DB_RECORD_X509_CERTIFICATE]])
+    if args.cert:
+        try:
+            TableMetadata, x509CertList = keychain.getTable(TableList[tableEnum[CSSM_DL_DB_RECORD_X509_CERTIFICATE]])
 
-        for x509Cert in x509CertList:
-            record = keychain.getx509Record(TableList[tableEnum[CSSM_DL_DB_RECORD_X509_CERTIFICATE]], x509Cert)
-            print '[+] Certificate'
-            print ' [-] Cert Type: %s' % CERT_TYPE[record[0]]
-            print ' [-] Cert Encoding: %s' % CERT_ENCODING[record[1]]
-            print ' [-] PrintName : %s' % record[2].rstrip('\0')
-            print ' [-] Alias : %s' % record[3].rstrip('\0')
-            print ' [-] Subject (ASN1 encoded)'
-            hexdump(record[4])
-            print ' [-] Issuer (ASN1 encoded):'
-            hexdump(record[5])
-            print ' [-] SerialNumber'
-            hexdump(record[6])
-            print ' [-] SubjectKeyIdentifier'
-            hexdump(record[7])
-            print ' [-] Public Key Hash'
-            hexdump(record[8])
-            print ' [-] Certificate'
-            if CERT_ENCODING[record[1]] == 'CSSM_CERT_ENCODING_DER':
-                # convert to PEM for easy cut/copy/paste to openssl command line
-                print_data_in_pem(record[9], 'CERTIFICATE')
-            else:
-                hexdump(record[9])
-            print ''
+            for x509Cert in x509CertList:
+                record = keychain.getx509Record(TableList[tableEnum[CSSM_DL_DB_RECORD_X509_CERTIFICATE]], x509Cert)
+                print '[+] Certificate'
+                print ' [-] Cert Type: %s' % CERT_TYPE[record[0]]
+                print ' [-] Cert Encoding: %s' % CERT_ENCODING[record[1]]
+                print ' [-] PrintName : %s' % record[2].rstrip('\0')
+                print ' [-] Alias : %s' % record[3].rstrip('\0')
+                print ' [-] Subject (ASN1 encoded)'
+                hexdump(record[4])
+                print ' [-] Issuer (ASN1 encoded):'
+                hexdump(record[5])
+                print ' [-] SerialNumber'
+                hexdump(record[6])
+                print ' [-] SubjectKeyIdentifier'
+                hexdump(record[7])
+                print ' [-] Public Key Hash'
+                hexdump(record[8])
+                print ' [-] Certificate'
+                if CERT_ENCODING[record[1]] == 'CSSM_CERT_ENCODING_DER':
+                    # convert to PEM for easy cut/copy/paste to openssl command line
+                    print_data_in_pem(record[9], 'CERTIFICATE')
+                else:
+                    hexdump(record[9])
+                print ''
 
-    except KeyError:
-        print '[!] Certification Table is not available'
-        pass
+        except KeyError:
+            print '[!] Certification Table is not available'
+            pass
 
-    try:
-        TableMetadata, PublicKeyList = keychain.getTable(TableList[tableEnum[CSSM_DL_DB_RECORD_PUBLIC_KEY]])
-        for PublicKey in PublicKeyList:
-            record = keychain.getKeyRecord(TableList[tableEnum[CSSM_DL_DB_RECORD_PUBLIC_KEY]], PublicKey)
-            print '[+] Public Key Record'
-            print ' [-] PrintName: %s' % record[0].rstrip('\0')
-            print ' [-] Label'
-            hexdump(record[1])
-            print ' [-] Key Class : %s' % KEY_TYPE[record[2]]
-            print ' [-] Private : %d' % record[3]
-            print ' [-] Key Type : %s' % CSSM_ALGORITHMS[record[4]]
-            print ' [-] Key Size : %d bits' % record[5]
-            print ' [-] Effective Key Size : %d bits' % record[6]
-            print ' [-] Extracted : %d' % record[7]
-            print ' [-] CSSM Type : %s' % STD_APPLE_ADDIN_MODULE[record[8]]
-            print ' [-] Public Key'
-            if CSSM_ALGORITHMS[record[4]] == 'CSSM_ALGID_RSA':
-                # convert to PEM for easy cut/copy/paste to openssl command line
-                print_data_in_pem(record[10], 'PUBLIC_KEY')
-            else:
-                hexdump(record[10])
-            print ''
+    if args.pubkey:
+        try:
+            TableMetadata, PublicKeyList = keychain.getTable(TableList[tableEnum[CSSM_DL_DB_RECORD_PUBLIC_KEY]])
+            for PublicKey in PublicKeyList:
+                record = keychain.getKeyRecord(TableList[tableEnum[CSSM_DL_DB_RECORD_PUBLIC_KEY]], PublicKey)
+                print '[+] Public Key Record'
+                print ' [-] PrintName: %s' % record[0].rstrip('\0')
+                print ' [-] Label'
+                hexdump(record[1])
+                print ' [-] Key Class : %s' % KEY_TYPE[record[2]]
+                print ' [-] Private : %d' % record[3]
+                print ' [-] Key Type : %s' % CSSM_ALGORITHMS[record[4]]
+                print ' [-] Key Size : %d bits' % record[5]
+                print ' [-] Effective Key Size : %d bits' % record[6]
+                print ' [-] Extracted : %d' % record[7]
+                print ' [-] CSSM Type : %s' % STD_APPLE_ADDIN_MODULE[record[8]]
+                print ' [-] Public Key'
+                if CSSM_ALGORITHMS[record[4]] == 'CSSM_ALGID_RSA':
+                    # convert to PEM for easy cut/copy/paste to openssl command line
+                    print_data_in_pem(record[10], 'PUBLIC_KEY')
+                else:
+                    hexdump(record[10])
+                print ''
 
-    except KeyError:
-        print '[!] Public Key Table is not available'
-        pass
+        except KeyError:
+            print '[!] Public Key Table is not available'
+            pass
 
-    try:
-        table_meta, PrivateKeyList = keychain.getTable(TableList[tableEnum[CSSM_DL_DB_RECORD_PRIVATE_KEY]])
-        for PrivateKey in PrivateKeyList:
-            record = keychain.getKeyRecord(TableList[tableEnum[CSSM_DL_DB_RECORD_PRIVATE_KEY]], PrivateKey)
-            print '[+] Private Key Record'
-            print ' [-] PrintName: %s' % record[0].rstrip('\0')
-            print ' [-] Label'
-            hexdump(record[1])
-            print ' [-] Key Class : %s' % KEY_TYPE[record[2]]
-            print ' [-] Private : %d' % record[3]
-            print ' [-] Key Type : %s' % CSSM_ALGORITHMS[record[4]]
-            print ' [-] Key Size : %d bits' % record[5]
-            print ' [-] Effective Key Size : %d bits' % record[6]
-            print ' [-] Extracted : %d' % record[7]
-            print ' [-] CSSM Type : %s' % STD_APPLE_ADDIN_MODULE[record[8]]
-            keyname, privatekey = keychain.PrivateKeyDecryption(record[10], record[9], dbkey)
-            print ' [-] Key Name'
-            hexdump(keyname)
-            print ' [-] Decrypted Private Key'
-            if CSSM_ALGORITHMS[record[4]] == 'CSSM_ALGID_RSA':
-                # convert to PEM for easy cut/copy/paste to openssl command line
-                print_data_in_pem(privatekey, 'PRIVATE_KEY')
-            else:
-                hexdump(privatekey)
-            print ''
+    if args.privkey:
+        try:
+            table_meta, PrivateKeyList = keychain.getTable(TableList[tableEnum[CSSM_DL_DB_RECORD_PRIVATE_KEY]])
+            for PrivateKey in PrivateKeyList:
+                record = keychain.getKeyRecord(TableList[tableEnum[CSSM_DL_DB_RECORD_PRIVATE_KEY]], PrivateKey)
+                if args.pkname is not None:
+                    pkname = args.pkname[0]
+                    if pkname in record[0].rstrip('\0'):
+                        keyname, privatekey = keychain.PrivateKeyDecryption(record[10], record[9], dbkey)
+                        if CSSM_ALGORITHMS[record[4]] == 'CSSM_ALGID_RSA':
+                            # convert to PEM for easy cut/copy/paste to openssl command line
+                            print_data_in_pem(privatekey, 'PRIVATE_KEY')
+                        break
+                    else:
+                        pass
+                else:
+                    print '[+] Private Key Record'
+                    print ' [-] PrintName: %s' % record[0].rstrip('\0')
+                    print ' [-] Label'
+                    hexdump(record[1])
+                    print ' [-] Key Class : %s' % KEY_TYPE[record[2]]
+                    print ' [-] Private : %d' % record[3]
+                    print ' [-] Key Type : %s' % CSSM_ALGORITHMS[record[4]]
+                    print ' [-] Key Size : %d bits' % record[5]
+                    print ' [-] Effective Key Size : %d bits' % record[6]
+                    print ' [-] Extracted : %d' % record[7]
+                    print ' [-] CSSM Type : %s' % STD_APPLE_ADDIN_MODULE[record[8]]
+                    keyname, privatekey = keychain.PrivateKeyDecryption(record[10], record[9], dbkey)
+                    print ' [-] Key Name'
+                    hexdump(keyname)
+                    print ' [-] Decrypted Private Key'
+                    if CSSM_ALGORITHMS[record[4]] == 'CSSM_ALGID_RSA':
+                        # convert to PEM for easy cut/copy/paste to openssl command line
+                        print_data_in_pem(privatekey, 'PRIVATE_KEY')
+                    else:
+                        hexdump(privatekey)
+                    print ''
 
-    except KeyError:
-        print '[!] Private Key Table is not available'
-        pass
+        except KeyError,e:
+            print e
+            print '[!] Private Key Table is not available'
+            pass
 
     exit()
 

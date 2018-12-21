@@ -722,6 +722,7 @@ def main():
     group1.add_argument('-k', '--key', nargs=1, help='Masterkey candidate', required=False)
     group1.add_argument('-p', '--password', nargs=1, help='User Password', required=False)
 
+    parser.add_argument('--all', default=False, help='Extract all item types', required=False, action='store_true')
     parser.add_argument('-g', '--genericpw', default=False, help='Get Generic PW Only', required=False, action='store_true')
     parser.add_argument('-i', '--internetpw', default=False, help='Get Internet PW Only', required=False, action='store_true')
     parser.add_argument('-a', '--appleshare', default=False, help='Get Apple Share Only', required=False, action='store_true')
@@ -729,7 +730,7 @@ def main():
     parser.add_argument('-q', '--pubkey', default=False, help='Get Public Keys Only', required=False, action='store_true')
 
     group2 = parser.add_argument_group('Private Key Searching')
-    group2.add_argument('-z', '--privkey', default=False, help='Get Private Keys Only', required=True, action='store_true')
+    group2.add_argument('-z', '--privkey', default=False, help='Get Private Keys Only', required=False, action='store_true')
     group2.add_argument('-x', '--pkname', nargs=1, help='Print only PEM formatted Private Key for given name', required=False)
 
     args = parser.parse_args()
@@ -776,14 +777,14 @@ def main():
         exit()
 
     # DEBUG
-    if args.pkname is None:
+    if args.pkname is None or args.all:
         print ' [-] DB Key'
         hexdump(dbkey)
 
     key_list = {}  # keyblob list
 
     # get symmetric key blob
-    if args.pkname is None:
+    if args.pkname is None or args.all:
         print '[+] Symmetric Key Table: 0x%.8x' % (sizeof(_APPL_DB_HEADER) + TableList[tableEnum[CSSM_DL_DB_RECORD_SYMMETRIC_KEY]])
     TableMetadata, symmetrickey_list = keychain.getTable(TableList[tableEnum[CSSM_DL_DB_RECORD_SYMMETRIC_KEY]])
 
@@ -795,7 +796,7 @@ def main():
             if passwd != '':
                 key_list[keyblob] = passwd
 
-    if args.genericpw:
+    if args.genericpw or args.all:
         try:
             TableMetadata, genericpw_list = keychain.getTable(TableList[tableEnum[CSSM_DL_DB_RECORD_GENERIC_PASSWORD]])
 
@@ -824,7 +825,7 @@ def main():
             print '[!] Generic Password Table is not available'
             pass
 
-    if args.internetpw:
+    if args.internetpw or args.all:
         try:
             TableMetadata, internetpw_list = keychain.getTable(TableList[tableEnum[CSSM_DL_DB_RECORD_INTERNET_PASSWORD]])
 
@@ -866,7 +867,7 @@ def main():
             print '[!] Internet Password Table is not available'
             pass
 
-    if args.appleshare:
+    if args.appleshare or args.all:
         try:
             TableMetadata, applesharepw_list = keychain.getTable(TableList[tableEnum[CSSM_DL_DB_RECORD_APPLESHARE_PASSWORD]])
 
@@ -905,7 +906,7 @@ def main():
             print '[!] AppleShare Table is not available'
             pass
 
-    if args.cert:
+    if args.cert or args.all:
         try:
             TableMetadata, x509CertList = keychain.getTable(TableList[tableEnum[CSSM_DL_DB_RECORD_X509_CERTIFICATE]])
 
@@ -938,7 +939,7 @@ def main():
             print '[!] Certification Table is not available'
             pass
 
-    if args.pubkey:
+    if args.pubkey or args.all:
         try:
             TableMetadata, PublicKeyList = keychain.getTable(TableList[tableEnum[CSSM_DL_DB_RECORD_PUBLIC_KEY]])
             for PublicKey in PublicKeyList:
@@ -966,7 +967,7 @@ def main():
             print '[!] Public Key Table is not available'
             pass
 
-    if args.privkey:
+    if args.privkey or args.all:
         try:
             table_meta, PrivateKeyList = keychain.getTable(TableList[tableEnum[CSSM_DL_DB_RECORD_PRIVATE_KEY]])
             for PrivateKey in PrivateKeyList:
